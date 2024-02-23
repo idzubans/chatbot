@@ -75,12 +75,19 @@ export async function POST(req: Request) {
   Rooms are: kitchen, living_room, bathroom, bedroom, Bathroom, dining_room
   Categories are: appliances, furniture, fixtures, decor, storage
   Subcategories are: refrigerators, ovens,kitchen_sets, microwaves, dishwashers, stoves, sofas, beds, sinks, showers,bathtubs, wc, lamps, curtains, closets, shelves
-  Colors are in English with first letter capitalized
   Dimensions are in centimeters
   Room, Category, Subcategory names are in English with all letters lowercase
   Here is the prompt from the user:
   ${userInput}
-  Given the database schema described above I need you to return an actual unescaped SQL query (and only SQL query) that I can ran over my DB to return products best described by the user prompt.
+  If the input from user is that it would be useful for me to query the database (like for example "I want a black fridge" or "I need appliences for my kitchen") for products then given the database schema described above I need you to return an actual SQL query (and only SQL query) that I can ran over my DB to return products best described by the user prompt.
+  If the input is just a general question then I need you to return a general answer to the user prompt but try to steer the conversation lightly towards the products in the database.
+  The result should be in json format:
+  {
+    "query": "SELECT * FROM Products WHERE ...",
+    "generalAnswer": "..."
+  }
+  One of the two fields should be empty.
+  General answers should be in Slovak language.
   `
 
   const chatCompletion = await openai.chat.completions.create({
@@ -90,22 +97,47 @@ export async function POST(req: Request) {
     max_tokens: 1000
   })
   if (chatCompletion.choices[0]?.message.content) {
-    const queryString = chatCompletion.choices[0]?.message.content
-    console.log(queryString)
+    // const queryString = chatCompletion.choices[0]?.message.content
+    console.log(chatCompletion.choices[0]?.message.content)
+    const { query, generalAnswer } = JSON.parse(
+      chatCompletion.choices[0]?.message.content
+    )
+    console.log(query)
+    console.log(generalAnswer)
 
-    const client = await sql.connect()
-    const { rows, fields } = await client.query(queryString)
-    client.release()
+    if (query) {
+      try {
+        const client = await sql.connect()
+        const { rows } = await client.query(query)
+        client.release()
 
-    console.log(rows)
-    const productDetailsToString = rows
-      .map(
-        product =>
-          `Name: ${product.name}\n Description: ${product.description}\n Price: $${product.price}\n Color: ${product.color}`
-      )
-      .join('\n\n')
-    return new Response(productDetailsToString)
+        console.log(rows)
+        if (rows.length === 0) {
+          return new Response(
+            'V našej ponuke máme veľa produktov, ktoré by Vás mohli zaujímať. Ak by ste mali konkrétny produkt na mysli, môžem Vám s tým pomôcť.'
+          )
+        }
+        let productDetailsToString = 'Tieto produkty by Vás mohli zaujímať:\n\n'
+        productDetailsToString =
+          productDetailsToString +
+          rows
+            .map(
+              (product: any) =>
+                `${product.name}\n Popis: ${product.description}\n Cena: $${product.price}\n Farba: ${product.color}`
+            )
+            .join('\n\n')
+        return new Response(productDetailsToString)
+      } catch (e) {
+        console.error(e)
+        return new Response(
+          'V našej ponuke máme veľa produktov, ktoré by Vás mohli zaujímať. Ak by ste mali konkrétny produkt na mysli, môžem Vám s tým pomôcť.'
+        )
+      }
+    }
+    return new Response(generalAnswer)
   } else {
-    return new Response('Daco nedobre')
+    return new Response(
+      'V našej ponuke máme veľa produktov, ktoré by Vás mohli zaujímať. Ak by ste mali konkrétny produkt na mysli, môžem Vám s tým pomôcť.'
+    )
   }
 }
